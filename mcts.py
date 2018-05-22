@@ -1,5 +1,6 @@
 import math
 import random
+
 import numpy
 
 import mes
@@ -41,7 +42,7 @@ class MCTSPlayer(player.Player):
                 v = 1.0
                 node.vsum = 0
             else:
-                prob, v = self.value_net.predict(self.get_board4train(node.last_action))
+                prob, v = self.value_net.predict(self.get_board4train(node.last_action, player_id))
                 node.children = {action: TreeNode(action) for action in self.mgame.get_valid_actions()}
                 prob[[action for action in range(prob.shape[0]) if action not in node.children]] = 0
                 if numpy.sum(prob) > 0:
@@ -49,17 +50,14 @@ class MCTSPlayer(player.Player):
                 for action in node.children:
                     node.children[action] = TreeNode(action)
                     node.children[action].p = prob[action]
-                    node.children[action].vsum = v
         else:
-            search_value_max = 0
             par_sqrt_n = math.sqrt(node.n)
-            selected_action = list(node.children.keys())[0]
-            for action in node.children:
-                child_search_value = node.children[action].get_search_value(par_sqrt_n)
-                if child_search_value > search_value_max \
-                        or (child_search_value == search_value_max and random.random() <= 1.0 / len(node.children)):
-                    selected_action = action
-                    search_value_max = node.children[action].get_search_value(par_sqrt_n)
+            child_search_values = {action: node.children[action].get_search_value(par_sqrt_n) for action in
+                                   node.children}
+            max_child_search_value = max(child_search_values.values())
+            good_children = [action for action in child_search_values if
+                             child_search_values[action] == max_child_search_value]
+            selected_action = random.choice(good_children)
             assert self.mgame.is_valid_action(selected_action)
             self.mgame.board[selected_action // self.mgame.w][selected_action % self.mgame.w] = player_id
             v = self.update(node.children[selected_action], 1 - player_id)
@@ -68,12 +66,12 @@ class MCTSPlayer(player.Player):
         node.n += 1
         return -v
 
-    def get_board4train(self, selected_action):
+    def get_board4train(self, selected_action, curr_ind):
         my_board = numpy.zeros(self.mgame.board.shape)
         other_board = numpy.zeros(self.mgame.board.shape)
         selected_board = numpy.zeros(self.mgame.board.shape)
-        my_board[self.mgame.board == self.ind] = 1
-        other_board[self.mgame.board == 1 - self.ind] = 1
+        my_board[self.mgame.board == curr_ind] = 1
+        other_board[self.mgame.board == 1 - curr_ind] = 1
         if selected_action >= 0:
             selected_board[selected_action // self.mgame.w][selected_action % self.mgame.w] = 1
         return numpy.dstack([my_board, other_board, selected_board])
@@ -87,26 +85,26 @@ class MCTSPlayer(player.Player):
         prob_sum = numpy.sum(prob)
         prob /= prob_sum
         if not self.trainable:
-            selected_action = numpy.argmax(prob)
+            max_prob = numpy.max(prob)
+            selected_action = random.choice([i for i in range(self.mgame.board_sz) if prob[i] == max_prob])
         else:
-            random_v = random.random()
-            selected_action = 0
-            for action in range(prob.shape[0]):
-                if random_v <= prob[action] and prob[action] > 0:
-                    selected_action = action
-                    break
-                else:
-                    random_v -= prob[action]
+            prob_valid = numpy.array(
+                [1.0 if self.mgame.is_valid_action(action) else 0.0 for action in range(self.mgame.board_sz)])
+            prob_valid /= numpy.sum(prob_valid)
+            selected_action = numpy.random.choice([i for i in range(self.mgame.board_sz)],
+                                                  p=prob_valid * 0.25 + prob * 0.75)
         self.curr_node = self.curr_node.children[selected_action]
         if self.trainable:
-            self.boards_store.append(self.get_board4train(selected_action))
+            self.mgame.board[selected_action // self.mgame.w][selected_action % self.mgame.w] = self.ind
+            self.boards_store.append(self.get_board4train(selected_action, self.ind))
+            self.mgame.board[selected_action // self.mgame.w][selected_action % self.mgame.w] = -1
             self.pies_store.append(prob)
         return selected_action
 
     def game_ended(self):
         if self.trainable:
             if self.mgame.winner == -1:
-                zs = [[0] for _ in range(len(self.boards_store))]
+                return
             elif self.mgame.winner == self.ind:
                 zs = [[1] for _ in range(len(self.boards_store))]
             else:

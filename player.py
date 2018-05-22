@@ -27,7 +27,8 @@ class HumanPlayer(Player):
         print(' '.join([chr(ch) for ch in range(ord('A'), ord('A') + self.mgame.w)]))
         for x in range(self.mgame.h):
             print(str(x + 1) + ''.join(
-                ['_' if self.mgame.board[x][y] == -1 else "%.0f" % self.mgame.board[x][y] for y in range(self.mgame.w)]))
+                ['_' if self.mgame.board[x][y] == -1 else "%.0f" % self.mgame.board[x][y] for y in
+                 range(self.mgame.w)]))
 
     def get_nxt_action(self):
         action = -1

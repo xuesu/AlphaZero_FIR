@@ -9,14 +9,15 @@ import mes
 def get_residual_unit(name, data, num_filter):
     with tf.name_scope(name) as sub_sub_scope:
         bn1 = tf.layers.batch_normalization(inputs=data, epsilon=1e-5)
-        conv1 = tf.layers.conv2d(inputs=bn1, filters=num_filter,  kernel_size=(3, 3),
+        conv1 = tf.layers.conv2d(inputs=bn1, filters=num_filter, kernel_size=(3, 3),
                                  strides=(1, 1), activation=tf.nn.relu,
                                  use_bias=False, padding='same')
         bn2 = tf.layers.batch_normalization(inputs=conv1, epsilon=1e-5)
         conv2 = tf.layers.conv2d(inputs=bn2, filters=num_filter, kernel_size=(3, 3),
                                  strides=(1, 1), activation=tf.nn.relu,
                                  use_bias=False, padding='same')
-        return data + conv2
+        out = tf.nn.relu(tf.add(bn2, conv2))
+        return out
 
 
 class ValueNet(object):
@@ -26,7 +27,7 @@ class ValueNet(object):
         self.graph = tf.Graph()
         with self.graph.as_default():
             with tf.name_scope("Input") as scope:
-                self.boards = tf.placeholder(tf.float32, shape=[None, mgame.w, mgame.h, 3])
+                self.boards = tf.placeholder(tf.float32, shape=[None, mgame.w, mgame.h, 3], name="Board_state")
 
             with tf.name_scope("ResNet") as scope:
                 self.conv0 = tf.layers.conv2d(inputs=self.boards, filters=mes.NET_FILTER_NUM, kernel_size=(3, 3),
@@ -49,18 +50,20 @@ class ValueNet(object):
 
             with tf.name_scope("Evaluation_Predict") as scope:
                 self.v_conv = tf.layers.conv2d(inputs=self.res_units[-1], filters=mes.NET_V_LAST_CNN_FILTER_NUM,
-                                               kernel_size=(self.mgame.num, self.mgame.num), activation=tf.nn.relu,
+                                               kernel_size=(1, 1), activation=tf.nn.relu,
                                                use_bias=False,
                                                padding='same')
                 self.v_conv_flatten = tf.reshape(self.v_conv, [-1, mes.NET_V_LAST_CNN_FILTER_NUM * self.mgame.board_sz])
                 self.v_linear = tf.layers.dense(inputs=self.v_conv_flatten, units=mes.NET_V_LAST_LINEAR_UNIT_NUM,
                                                 activation=tf.nn.relu, name="v_linear")
-                self.v_dense = tf.layers.dense(inputs=self.v_linear, units=1, activation=tf.nn.tanh, name="v_result")
+                self.v_linear2 = tf.layers.dense(inputs=self.v_linear, units=mes.NET_V_LAST_LINEAR_UNIT_NUM // 4,
+                                                 activation=tf.nn.relu, name="v_linear2")
+                self.v_dense = tf.layers.dense(inputs=self.v_linear2, units=1, activation=tf.nn.tanh, name="v_result")
 
             with tf.name_scope("Train") as scope:
                 with tf.name_scope("Labels") as sub_scope:
-                    self.zs = tf.placeholder(tf.float32, shape=[None, 1])
-                    self.pies = tf.placeholder(tf.float32, shape=[None, self.mgame.board_sz])
+                    self.zs = tf.placeholder(tf.float32, shape=[None, 1], name="Zs")
+                    self.pies = tf.placeholder(tf.float32, shape=[None, self.mgame.board_sz], name="Pies")
                 with tf.name_scope("Loss") as sub_scope:
                     self.value_loss = tf.losses.mean_squared_error(self.zs, self.v_dense)
                     self.p_pie_sum = tf.reduce_sum(
@@ -71,9 +74,9 @@ class ValueNet(object):
                         [tf.nn.l2_loss(variable) for variable in tf.trainable_variables()
                          if 'bias' not in variable.name.lower()]
                     )
-                    self.loss = self.value_loss + self.policy_loss + self.l2_penalty
+                    self.loss = self.value_loss * 10 + self.policy_loss + self.l2_penalty
 
-                self.optimizer = tf.train.AdamOptimizer(learning_rate=0.01).minimize(self.loss)
+                self.optimizer = tf.train.AdamOptimizer().minimize(self.loss)
 
             with tf.name_scope("Others") as scope:
                 self.saver = tf.train.Saver()
@@ -98,20 +101,23 @@ class ValueNet(object):
         self.data_store_len = 0
 
     def train_step(self, boards, zs, pies):
-        for board, z, pie in zip(boards[2:], zs[2:], pies[2:]):
+        for board, z, pie in zip(boards[1:], zs[1:], pies[1:]):
             self.data_store[self.boards][self.data_store_len] = board
             self.data_store[self.zs][self.data_store_len] = z
             self.data_store[self.pies][self.data_store_len] = pie
             self.data_store_len += 1
             if self.data_store_len == mes.NET_BATCH_LEN:
-                if self.loggable:
-                    _, summary, loss = self.session.run([self.optimizer, self.merge_all, self.optimizer],
-                                                        feed_dict=self.data_store)
-                    self.writer.add_summary(summary)
-                else:
-                    _, loss = self.session.run([self.optimizer, self.optimizer],
-                                               feed_dict=self.data_store)
-
+                for i in range(mes.TRAIN_PER_EPOCH):
+                    if self.loggable:
+                        _, summary, loss, v_dense, v_loss = self.session.run(
+                            [self.optimizer, self.merge_all, self.loss, self.v_dense, self.value_loss],
+                            feed_dict=self.data_store)
+                        self.writer.add_summary(summary)
+                    else:
+                        _, loss, v_dense, v_loss = self.session.run([self.optimizer, self.loss, self.v_dense, self.value_loss],
+                                                            feed_dict=self.data_store)
+                    v_dense_mean = numpy.mean(numpy.abs(v_dense))
+                    print(f"Loss {loss}, V_dense_mean {v_dense_mean}, V loss {v_loss}")
                 self.data_store_len = 0
 
     def predict(self, board):

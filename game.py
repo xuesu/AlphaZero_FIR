@@ -91,6 +91,7 @@ class FIRGame(Game):
                 print(f'Player{player_id}: Action: {action}')
             if not self.is_valid_action(action):
                 # because now just consider 2 players
+                print(f"Player: {player_id}, Action: {action} Did Not choose a valid action!")
                 self.board[action // self.w][action % self.w] = player_id
                 self.winner = 1 - player_id
             else:
