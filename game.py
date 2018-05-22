@@ -87,7 +87,8 @@ class FIRGame(Game):
             player_id = step_i & 1
             player = self.players[player_id]
             action = player.nxt_move()
-            print(f'Player{player_id}: Action: {action}')
+            if isinstance(player, mcts.MCTSPlayer) and player.value_net.loggable:
+                print(f'Player{player_id}: Action: {action}')
             if not self.is_valid_action(action):
                 # because now just consider 2 players
                 self.board[action // self.w][action % self.w] = player_id

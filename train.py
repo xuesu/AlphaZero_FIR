@@ -4,8 +4,10 @@ import symbol
 
 
 def evaluate(value_net):
+    value_net.loggable = False
+    print("Evaluating...")
     other_game = game.FIRGame()
-    other_value_net = symbol.ValueNet(other_game, renew=False)
+    other_value_net = symbol.ValueNet(other_game, renew=False, loggable=False)
     win_num = 0
     tie_num = 0
     lose_num = 0
@@ -24,6 +26,7 @@ def evaluate(value_net):
             lose_num += 1
             score -= 1
     print(f"Win:{win_num}, Tie:{tie_num}, Lose:{lose_num}")
+    value_net.loggable = True
     return score
 
 
@@ -35,9 +38,9 @@ def train():
         mgame.add_player(value_net=value_net, is_human=False, trainable=True)
         mgame.add_player(value_net=value_net, is_human=False, trainable=True)
         mgame.play()
-    if evaluate(value_net) > 0:
-        print("Saving...")
-        value_net.save()
+        if i % mes.TRAIN_STEP_PER_EVALUATE == 0 and evaluate(value_net) > 0:
+            print("Saving...")
+            value_net.save()
 
 
 if __name__ == '__main__':

@@ -1,19 +1,19 @@
 import math
 import random
-
 import numpy
 
 import mes
 import player
+import symbol
 
 
 class TreeNode(object):
-    def __init__(self, last_action, parent_keys):
+    def __init__(self, last_action):
         self.vsum = 0
         self.p = 1
         self.n = 0
         self.last_action = last_action
-        self.children = {action: None for action in parent_keys if action != last_action}
+        self.children = dict()
 
     def get_search_value(self, par_sqrt_n):
         if self.n == 0:
@@ -24,22 +24,32 @@ class TreeNode(object):
 class MCTSPlayer(player.Player):
     def __init__(self, ind, mgame, value_net, trainable=True):
         super(MCTSPlayer, self).__init__(ind, mgame)
+        if value_net is None:
+            self.value_net = symbol.ValueNet(mgame=mgame)
         self.value_net = value_net
-        self.curr_node = TreeNode(-1, self.mgame.get_valid_actions())
+        self.curr_node = TreeNode(-1)
         self.pies_store = []
         self.boards_store = []
         self.trainable = trainable
 
-    def update(self, node, mgame):
-        if node.n == 0:
-            prob, v = self.value_net.predict(self.get_board4train(mgame, node.last_action))
-            prob[[action for action in range(prob.shape[0]) if action not in node.children]] = 0
-            if numpy.sum(prob) > 0:
-                prob /= numpy.sum(prob)
-            for action in node.children:
-                node.children[action] = TreeNode(action, list(node.children.keys()))
-                node.children[action].p = prob[action]
-                node.children[action].vsum = v
+    def update(self, node, player_id=None):
+        if player_id is None:
+            player_id = self.ind
+        if node.n == 0 or not node.children:
+            if self.mgame.k0() != -1:
+                # winner is this node, however, not current player
+                v = 1.0
+                node.vsum = 0
+            else:
+                prob, v = self.value_net.predict(self.get_board4train(node.last_action))
+                node.children = {action: TreeNode(action) for action in self.mgame.get_valid_actions()}
+                prob[[action for action in range(prob.shape[0]) if action not in node.children]] = 0
+                if numpy.sum(prob) > 0:
+                    prob /= numpy.sum(prob)
+                for action in node.children:
+                    node.children[action] = TreeNode(action)
+                    node.children[action].p = prob[action]
+                    node.children[action].vsum = v
         else:
             search_value_max = 0
             par_sqrt_n = math.sqrt(node.n)
@@ -50,24 +60,27 @@ class MCTSPlayer(player.Player):
                         or (child_search_value == search_value_max and random.random() <= 1.0 / len(node.children)):
                     selected_action = action
                     search_value_max = node.children[action].get_search_value(par_sqrt_n)
-            v = self.update(node.children[selected_action], mgame)
+            assert self.mgame.is_valid_action(selected_action)
+            self.mgame.board[selected_action // self.mgame.w][selected_action % self.mgame.w] = player_id
+            v = self.update(node.children[selected_action], 1 - player_id)
+            self.mgame.board[selected_action // self.mgame.w][selected_action % self.mgame.w] = -1
         node.vsum += v
         node.n += 1
-        return v
+        return -v
 
-    def get_board4train(self, mgame, selected_action):
-        my_board = numpy.zeros(mgame.board.shape)
-        other_board = numpy.zeros(mgame.board.shape)
-        selected_board = numpy.zeros(mgame.board.shape)
-        my_board[mgame.board == self.ind] = 1
-        other_board[mgame.board == 1 - self.ind] = 1
+    def get_board4train(self, selected_action):
+        my_board = numpy.zeros(self.mgame.board.shape)
+        other_board = numpy.zeros(self.mgame.board.shape)
+        selected_board = numpy.zeros(self.mgame.board.shape)
+        my_board[self.mgame.board == self.ind] = 1
+        other_board[self.mgame.board == 1 - self.ind] = 1
         if selected_action >= 0:
-            selected_board[selected_action // mgame.w][selected_action % mgame.w] = 1
+            selected_board[selected_action // self.mgame.w][selected_action % self.mgame.w] = 1
         return numpy.dstack([my_board, other_board, selected_board])
 
     def nxt_move(self):
         for _ in range(mes.MCTS_UPDATE_NUM):
-            self.update(self.curr_node, self.mgame)
+            self.update(self.curr_node)
         prob = numpy.zeros([mes.FIR_BOARD_SZ])
         for action in self.curr_node.children:
             prob[action] = math.pow(self.curr_node.children[action].n, mes.TAO_N_MCTS)
@@ -86,7 +99,7 @@ class MCTSPlayer(player.Player):
                     random_v -= prob[action]
         self.curr_node = self.curr_node.children[selected_action]
         if self.trainable:
-            self.boards_store.append(self.get_board4train(self.mgame, selected_action))
+            self.boards_store.append(self.get_board4train(selected_action))
             self.pies_store.append(prob)
         return selected_action
 
@@ -103,4 +116,4 @@ class MCTSPlayer(player.Player):
     def other_nxt_move(self, action):
         self.curr_node = self.curr_node.children[action] \
             if self.curr_node.n != 0 and action in self.curr_node.children \
-            else TreeNode(action, self.mgame.get_valid_actions())
+            else TreeNode(action)

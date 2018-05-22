@@ -4,7 +4,7 @@ import symbol
 
 def test():
     mgame = game.FIRGame()
-    value_net = symbol.ValueNet(mgame, renew=False)
+    value_net = symbol.ValueNet(mgame, renew=False, loggable=False)
     for _ in range(2):
         op = input("AI?(Y/N)").strip().upper()
         if op == 'Y':
