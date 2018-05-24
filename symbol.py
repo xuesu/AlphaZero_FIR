@@ -1,6 +1,7 @@
-import os
-
+import collections
 import numpy
+import os
+import random
 import tensorflow as tf
 
 import mes
@@ -8,14 +9,13 @@ import mes
 
 def get_residual_unit(name, data, num_filter):
     with tf.name_scope(name) as sub_sub_scope:
+        conv1 = tf.layers.conv2d(inputs=data, filters=num_filter, kernel_size=(3, 3),
+                                 use_bias=False, padding='same')
         bn1 = tf.layers.batch_normalization(inputs=data, epsilon=1e-5)
-        conv1 = tf.layers.conv2d(inputs=bn1, filters=num_filter, kernel_size=(3, 3),
-                                 strides=(1, 1), activation=tf.nn.relu,
+        relu1 = tf.nn.relu(bn1)
+        conv2 = tf.layers.conv2d(inputs=relu1, filters=num_filter, kernel_size=(3, 3),
                                  use_bias=False, padding='same')
         bn2 = tf.layers.batch_normalization(inputs=conv1, epsilon=1e-5)
-        conv2 = tf.layers.conv2d(inputs=bn2, filters=num_filter, kernel_size=(3, 3),
-                                 strides=(1, 1), activation=tf.nn.relu,
-                                 use_bias=False, padding='same')
         out = tf.nn.relu(tf.add(bn2, conv2))
         return out
 
@@ -31,8 +31,8 @@ class ValueNet(object):
 
             with tf.name_scope("ResNet") as scope:
                 self.conv0 = tf.layers.conv2d(inputs=self.boards, filters=mes.NET_FILTER_NUM, kernel_size=(3, 3),
-                                              activation=tf.nn.relu, use_bias=False, padding='same')
-                data = self.conv0
+                                              use_bias=False, padding='same')
+                data = tf.nn.relu(tf.layers.batch_normalization(self.conv0))
                 self.res_units = []
                 for i in range(mes.NET_LAYER_NUM):
                     res_unit = get_residual_unit("resnet_cell_%d" % (i + 1), data, mes.NET_FILTER_NUM)
@@ -41,24 +41,23 @@ class ValueNet(object):
 
             with tf.name_scope("Actions_Predict") as scope:
                 self.p_conv = tf.layers.conv2d(inputs=self.res_units[-1], filters=mes.NET_ACT_LAST_CNN_FILTER_NUM,
-                                               kernel_size=(1, 1), activation=tf.nn.relu, use_bias=False,
+                                               kernel_size=(1, 1), use_bias=False,
                                                padding='same')
-                self.p_conv_flatten = tf.reshape(self.p_conv,
+                self.p_conv_flatten = tf.reshape(tf.nn.relu(tf.layers.batch_normalization(self.p_conv)),
                                                  [-1, mes.NET_ACT_LAST_CNN_FILTER_NUM * self.mgame.board_sz])
                 self.p_dense = tf.layers.dense(inputs=self.p_conv_flatten, units=self.mgame.board_sz,
                                                activation=tf.nn.softmax, name="action_result")
 
             with tf.name_scope("Evaluation_Predict") as scope:
                 self.v_conv = tf.layers.conv2d(inputs=self.res_units[-1], filters=mes.NET_V_LAST_CNN_FILTER_NUM,
-                                               kernel_size=(1, 1), activation=tf.nn.relu,
+                                               kernel_size=(1, 1),
                                                use_bias=False,
                                                padding='same')
-                self.v_conv_flatten = tf.reshape(self.v_conv, [-1, mes.NET_V_LAST_CNN_FILTER_NUM * self.mgame.board_sz])
+                self.v_conv_flatten = tf.reshape(tf.nn.relu(tf.layers.batch_normalization(self.v_conv)),
+                                                 [-1, mes.NET_V_LAST_CNN_FILTER_NUM * self.mgame.board_sz])
                 self.v_linear = tf.layers.dense(inputs=self.v_conv_flatten, units=mes.NET_V_LAST_LINEAR_UNIT_NUM,
                                                 activation=tf.nn.relu, name="v_linear")
-                self.v_linear2 = tf.layers.dense(inputs=self.v_linear, units=mes.NET_V_LAST_LINEAR_UNIT_NUM // 4,
-                                                 activation=tf.nn.relu, name="v_linear2")
-                self.v_dense = tf.layers.dense(inputs=self.v_linear2, units=1, activation=tf.nn.tanh, name="v_result")
+                self.v_dense = tf.layers.dense(inputs=self.v_linear, units=1, activation=tf.nn.tanh, name="v_result")
 
             with tf.name_scope("Train") as scope:
                 with tf.name_scope("Labels") as sub_scope:
@@ -74,13 +73,15 @@ class ValueNet(object):
                         [tf.nn.l2_loss(variable) for variable in tf.trainable_variables()
                          if 'bias' not in variable.name.lower()]
                     )
-                    self.loss = self.value_loss * 10 + self.policy_loss + self.l2_penalty
+                    self.loss = self.value_loss + self.policy_loss + self.l2_penalty
 
                 self.optimizer = tf.train.AdamOptimizer().minimize(self.loss)
 
             with tf.name_scope("Others") as scope:
                 self.saver = tf.train.Saver()
                 if self.loggable:
+                    self.v_dense_mean = tf.reduce_mean(tf.abs(self.v_dense))
+                    tf.summary.scalar('V Mean', self.v_dense_mean)
                     tf.summary.scalar('Value loss', self.value_loss)
                     tf.summary.scalar('Policy loss', self.policy_loss)
                     tf.summary.scalar('L2 Penalty', self.l2_penalty)
@@ -95,35 +96,37 @@ class ValueNet(object):
             else:
                 init = tf.global_variables_initializer()
                 self.session.run(init)
-        self.data_store = {self.boards: numpy.ndarray([mes.NET_BATCH_LEN, self.mgame.h, self.mgame.w, 3]),
-                           self.pies: numpy.ndarray([mes.NET_BATCH_LEN, self.mgame.board_sz]),
-                           self.zs: numpy.ndarray([mes.NET_BATCH_LEN, 1])}
-        self.data_store_len = 0
+        self.data_store = collections.deque(maxlen=mes.NET_BATCH_LEN * 3)
+        self.train_step_cnt = mes.EPOCH_PER_TRAIN
 
     def train_step(self, boards, zs, pies):
-        for board, z, pie in zip(boards[1:], zs[1:], pies[1:]):
-            self.data_store[self.boards][self.data_store_len] = board
-            self.data_store[self.zs][self.data_store_len] = z
-            self.data_store[self.pies][self.data_store_len] = pie
-            self.data_store_len += 1
-            if self.data_store_len == mes.NET_BATCH_LEN:
-                for i in range(mes.TRAIN_PER_EPOCH):
-                    if self.loggable:
-                        _, summary, loss, v_dense, v_loss = self.session.run(
-                            [self.optimizer, self.merge_all, self.loss, self.v_dense, self.value_loss],
-                            feed_dict=self.data_store)
-                        self.writer.add_summary(summary)
-                    else:
-                        _, loss, v_dense, v_loss = self.session.run([self.optimizer, self.loss, self.v_dense, self.value_loss],
-                                                            feed_dict=self.data_store)
-                    v_dense_mean = numpy.mean(numpy.abs(v_dense))
-                    print(f"Loss {loss}, V_dense_mean {v_dense_mean}, V loss {v_loss}")
-                self.data_store_len = 0
+        for board, z, pie in zip(boards, zs, pies):
+            self.data_store.append((board, z, pie))
+        if self.train_step_cnt > 0:
+            self.train_step_cnt -= 1
+
+        if self.train_step_cnt == 0 and len(self.data_store) >= mes.NET_BATCH_LEN:
+            self.train_step_cnt = mes.EPOCH_PER_TRAIN
+            selected_data = random.sample(self.data_store, mes.NET_BATCH_LEN)
+            feed_dict = {
+                self.boards: numpy.array([d[0] for d in selected_data]),
+                self.zs: numpy.array([d[1] for d in selected_data]),
+                self.pies: numpy.array([d[2] for d in selected_data])
+            }
+            for i in range(mes.TRAIN_PER_EPOCH):
+                if self.loggable:
+                    _, summary, loss = self.session.run(
+                        [self.optimizer, self.merge_all, self.loss],
+                        feed_dict=feed_dict)
+                    self.writer.add_summary(summary)
+                else:
+                    _, loss = self.session.run(
+                        [self.optimizer, self.loss],
+                        feed_dict=feed_dict)
 
     def predict(self, board):
         feed_dict = {self.boards: numpy.array([board])}
-        vs, probs, p_conv_flatten = self.session.run([self.v_dense, self.p_dense, self.p_conv_flatten],
-                                                     feed_dict=feed_dict)
+        vs, probs = self.session.run([self.v_dense, self.p_dense], feed_dict=feed_dict)
         return probs[0], vs[0][0]
 
     def save(self):

@@ -42,7 +42,7 @@ class MCTSPlayer(player.Player):
                 v = 1.0
                 node.vsum = 0
             else:
-                prob, v = self.value_net.predict(self.get_board4train(node.last_action, player_id))
+                prob, v = self.value_net.predict(self.get_board4train(node.last_action,1 - player_id))
                 node.children = {action: TreeNode(action) for action in self.mgame.get_valid_actions()}
                 prob[[action for action in range(prob.shape[0]) if action not in node.children]] = 0
                 if numpy.sum(prob) > 0:
@@ -79,22 +79,24 @@ class MCTSPlayer(player.Player):
     def nxt_move(self):
         for _ in range(mes.MCTS_UPDATE_NUM):
             self.update(self.curr_node)
-        prob = numpy.zeros([mes.FIR_BOARD_SZ])
-        for action in self.curr_node.children:
-            prob[action] = math.pow(self.curr_node.children[action].n, mes.TAO_N_MCTS)
-        prob_sum = numpy.sum(prob)
-        prob /= prob_sum
-        if not self.trainable:
-            max_prob = numpy.max(prob)
-            selected_action = random.choice([i for i in range(self.mgame.board_sz) if prob[i] == max_prob])
+        actions = [action for action in self.curr_node.children]
+        if self.trainable:
+            prob_vs = numpy.array([math.pow(self.curr_node.children[action].n, self.mgame.tao) for action in actions])
         else:
-            prob_valid = numpy.array(
-                [1.0 if self.mgame.is_valid_action(action) else 0.0 for action in range(self.mgame.board_sz)])
-            prob_valid /= numpy.sum(prob_valid)
-            selected_action = numpy.random.choice([i for i in range(self.mgame.board_sz)],
-                                                  p=prob_valid * 0.25 + prob * 0.75)
+            prob_vs = numpy.array([math.pow(self.curr_node.children[action].n, 0.001) for action in actions])
+
+        prob_vs /= numpy.sum(prob_vs)
+        if not self.trainable:
+            max_prob = numpy.max(prob_vs)
+            selected_action = random.choice([actions[i] for i in range(len(actions)) if prob_vs[i] == max_prob])
+        else:
+            selected_action = numpy.random.choice(actions, p=numpy.random.dirichlet(
+                0.3 * numpy.ones(shape=prob_vs.shape)) * 0.25 + prob_vs * 0.75)
         self.curr_node = self.curr_node.children[selected_action]
         if self.trainable:
+            prob = numpy.zeros(shape=[self.mgame.board_sz])
+            for action, prob_v in zip(actions, prob_vs):
+                prob[action] = prob_v
             self.mgame.board[selected_action // self.mgame.w][selected_action % self.mgame.w] = self.ind
             self.boards_store.append(self.get_board4train(selected_action, self.ind))
             self.mgame.board[selected_action // self.mgame.w][selected_action % self.mgame.w] = -1

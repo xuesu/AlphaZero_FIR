@@ -58,6 +58,7 @@ class FIRGame(Game):
         self.h = mes.FIR_H
         self.num = mes.FIR_SUCCESS_NUM
         self.max_step = min(self.w * self.h, mes.MAX_STEP_UPHEAVAL)
+        self.tao = 1
         self.reset()
 
     def add_player(self, is_human=True, trainable=False, value_net=None):
@@ -84,6 +85,10 @@ class FIRGame(Game):
             need to call reset before a new game start
         """
         for step_i in range(self.max_step):
+            if step_i < 10:
+                self.tao = 1
+            else:
+                self.tao = 10.0 / step_i
             player_id = step_i & 1
             player = self.players[player_id]
             action = player.nxt_move()

@@ -53,4 +53,4 @@ class HumanPlayer(Player):
         elif self.mgame.winner == self.ind:
             print("YOU WIN!")
         else:
-            print("YOU LOSE!\nThe winner is " + self.mgame.winner)
+            print(f"YOU LOSE!\nThe winner is {self.mgame.winner}")

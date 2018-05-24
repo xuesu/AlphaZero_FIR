@@ -38,7 +38,7 @@ def train():
         mgame.add_player(value_net=value_net, is_human=False, trainable=True)
         mgame.add_player(value_net=value_net, is_human=False, trainable=True)
         mgame.play()
-        if i % mes.TRAIN_STEP_PER_EVALUATE == 0 and evaluate(value_net) > 0 :
+        if i % mes.TRAIN_STEP_PER_EVALUATE == 0 and evaluate(value_net) > 0:
             print("Saving...")
             value_net.save()
 
