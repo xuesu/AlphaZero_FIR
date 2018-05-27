@@ -3,13 +3,12 @@ import os
 
 ROOT_DIR_PATH = os.path.join(*(os.path.split(os.path.abspath(__file__))[:-1]))
 
-FIR_W = 5  # 五子棋游戏棋盘宽度，标准为13，但训练速度过慢
-FIR_H = 5  # 五子棋游戏棋盘高度
+FIR_W = 6  # 五子棋游戏棋盘宽度，标准为13，但训练速度过慢
+FIR_H = 6  # 五子棋游戏棋盘高度
 FIR_BOARD_SZ = FIR_H * FIR_W  # 五子棋游戏棋盘格数
-FIR_SUCCESS_NUM = 3  # 连满几颗获胜
-C_U_MCTS = 5  # MCTS新结点探索偏重
-TAO_N_MCTS = 1  # MCTS搜索权重次数
-MCTS_UPDATE_NUM = FIR_BOARD_SZ * 15  # 每次MCTS搜索执行多少次拓展
+FIR_SUCCESS_NUM = 4  # 连满几颗获胜
+C_U_MCTS = 5.0  # MCTS新结点探索偏重
+MCTS_UPDATE_NUM = FIR_BOARD_SZ * 20  # 每次MCTS搜索执行多少次拓展
 MAX_STEP_UPHEAVAL = 100  # 游戏最大步数
 NET_FILTER_NUM = 32  # 网络
 NET_LAYER_NUM = 1  # 残差网络层数

@@ -10,8 +10,8 @@ import symbol
 
 class TreeNode(object):
     def __init__(self, last_action):
-        self.vsum = 0
-        self.p = 1
+        self.vsum = 0.0
+        self.p = 1.0
         self.n = 0
         self.last_action = last_action
         self.children = dict()
@@ -19,7 +19,7 @@ class TreeNode(object):
     def get_search_value(self, par_sqrt_n):
         if self.n == 0:
             return mes.C_U_MCTS * self.p * par_sqrt_n
-        return self.vsum / self.n + mes.C_U_MCTS * self.p * par_sqrt_n / (1 + self.n)
+        return self.vsum / float(self.n) + mes.C_U_MCTS * self.p * par_sqrt_n / (1 + self.n)
 
 
 class MCTSPlayer(player.Player):
@@ -40,9 +40,8 @@ class MCTSPlayer(player.Player):
             if self.mgame.k0() != -1:
                 # winner is this node, however, not current player
                 v = 1.0
-                node.vsum = 0
             else:
-                prob, v = self.value_net.predict(self.get_board4train(node.last_action,1 - player_id))
+                prob, v = self.value_net.predict(self.get_board4train(player_id, self.curr_node.last_action))
                 node.children = {action: TreeNode(action) for action in self.mgame.get_valid_actions()}
                 prob[[action for action in range(prob.shape[0]) if action not in node.children]] = 0
                 if numpy.sum(prob) > 0:
@@ -66,25 +65,21 @@ class MCTSPlayer(player.Player):
         node.n += 1
         return -v
 
-    def get_board4train(self, selected_action, curr_ind):
+    def get_board4train(self, curr_ind, last_action):
         my_board = numpy.zeros(self.mgame.board.shape)
         other_board = numpy.zeros(self.mgame.board.shape)
-        selected_board = numpy.zeros(self.mgame.board.shape)
+        last_board = numpy.zeros(self.mgame.board.shape)
         my_board[self.mgame.board == curr_ind] = 1
         other_board[self.mgame.board == 1 - curr_ind] = 1
-        if selected_action >= 0:
-            selected_board[selected_action // self.mgame.w][selected_action % self.mgame.w] = 1
-        return numpy.dstack([my_board, other_board, selected_board])
+        if last_action >= 0:
+            last_board[last_action // self.mgame.w][last_action % self.mgame.w] = 1
+        return numpy.dstack([my_board, other_board, last_board])
 
     def nxt_move(self):
         for _ in range(mes.MCTS_UPDATE_NUM):
             self.update(self.curr_node)
         actions = [action for action in self.curr_node.children]
-        if self.trainable:
-            prob_vs = numpy.array([math.pow(self.curr_node.children[action].n, self.mgame.tao) for action in actions])
-        else:
-            prob_vs = numpy.array([math.pow(self.curr_node.children[action].n, 0.001) for action in actions])
-
+        prob_vs = numpy.array([self.curr_node.children[action].n for action in actions], dtype=float)
         prob_vs /= numpy.sum(prob_vs)
         if not self.trainable:
             max_prob = numpy.max(prob_vs)
@@ -97,23 +92,22 @@ class MCTSPlayer(player.Player):
             prob = numpy.zeros(shape=[self.mgame.board_sz])
             for action, prob_v in zip(actions, prob_vs):
                 prob[action] = prob_v
-            self.mgame.board[selected_action // self.mgame.w][selected_action % self.mgame.w] = self.ind
-            self.boards_store.append(self.get_board4train(selected_action, self.ind))
-            self.mgame.board[selected_action // self.mgame.w][selected_action % self.mgame.w] = -1
+            self.boards_store.append(self.get_board4train(self.ind, self.curr_node.last_action))
             self.pies_store.append(prob)
         return selected_action
 
     def game_ended(self):
         if self.trainable:
             if self.mgame.winner == -1:
-                return
+                zs = [[0] for _ in range(len(self.boards_store))]
             elif self.mgame.winner == self.ind:
-                zs = [[1] for _ in range(len(self.boards_store))]
-            else:
                 zs = [[-1] for _ in range(len(self.boards_store))]
+            else:
+                zs = [[1] for _ in range(len(self.boards_store))]
             self.value_net.train_step(self.boards_store, zs, self.pies_store)
 
     def other_nxt_move(self, action):
         self.curr_node = self.curr_node.children[action] \
-            if self.curr_node.n != 0 and action in self.curr_node.children \
+            if self.trainable and self.curr_node.n != 0 and action in self.curr_node.children \
             else TreeNode(action)
+

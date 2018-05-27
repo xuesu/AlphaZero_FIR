@@ -24,7 +24,7 @@ class HumanPlayer(Player):
         super(HumanPlayer, self).__init__(ind, mgame)
 
     def show_board(self):
-        print(' '.join([chr(ch) for ch in range(ord('A'), ord('A') + self.mgame.w)]))
+        print('_' + ''.join([chr(ch) for ch in range(ord('A'), ord('A') + self.mgame.w)]))
         for x in range(self.mgame.h):
             print(str(x + 1) + ''.join(
                 ['_' if self.mgame.board[x][y] == -1 else "%.0f" % self.mgame.board[x][y] for y in

@@ -11,11 +11,11 @@ def get_residual_unit(name, data, num_filter):
     with tf.name_scope(name) as sub_sub_scope:
         conv1 = tf.layers.conv2d(inputs=data, filters=num_filter, kernel_size=(3, 3),
                                  use_bias=False, padding='same')
-        bn1 = tf.layers.batch_normalization(inputs=data, epsilon=1e-5)
+        bn1 = tf.layers.batch_normalization(inputs=data)
         relu1 = tf.nn.relu(bn1)
         conv2 = tf.layers.conv2d(inputs=relu1, filters=num_filter, kernel_size=(3, 3),
                                  use_bias=False, padding='same')
-        bn2 = tf.layers.batch_normalization(inputs=conv1, epsilon=1e-5)
+        bn2 = tf.layers.batch_normalization(inputs=conv1)
         out = tf.nn.relu(tf.add(bn2, conv2))
         return out
 
@@ -96,7 +96,7 @@ class ValueNet(object):
             else:
                 init = tf.global_variables_initializer()
                 self.session.run(init)
-        self.data_store = collections.deque(maxlen=mes.NET_BATCH_LEN * 3)
+        self.data_store = collections.deque(maxlen=mes.NET_BATCH_LEN * mes.TRAIN_PER_EPOCH)
         self.train_step_cnt = mes.EPOCH_PER_TRAIN
 
     def train_step(self, boards, zs, pies):
